@@ -116,9 +116,13 @@ func main() {
 	}
 
 	if result != nil {
-		output, err := json.Marshal(toGoValue(result))
+		// Always wrap in a consistent JSON structure
+		outputMap := map[string]interface{}{
+			"result": toGoValue(result),
+		}
+		output, err := json.Marshal(outputMap)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Marshal error:", err)
+			fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"%v\"}\n", err)
 			os.Exit(1)
 		}
 		fmt.Println(string(output))
