@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -18,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/risor-io/risor"
 	"github.com/risor-io/risor/object"
 )
@@ -98,6 +101,14 @@ func main() {
 		risor.WithGlobal("os_name", wrapFunc(osName)),
 		risor.WithGlobal("hostname", wrapFunc(hostname)),
 		risor.WithGlobal("env_var", wrapFunc(envVar)),
+		// Random & ID
+		risor.WithGlobal("uuid", wrapFunc(uuidGen)),
+		risor.WithGlobal("random_int", wrapFunc(randomInt)),
+		risor.WithGlobal("random_choice", wrapFunc(randomChoice)),
+		// Encoding
+		risor.WithGlobal("url_encode", wrapFunc(urlEncode)),
+		risor.WithGlobal("url_decode", wrapFunc(urlDecode)),
+		risor.WithGlobal("html_encode", wrapFunc(htmlEncode)),
 	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
@@ -265,6 +276,57 @@ func envVar(args ...interface{}) (interface{}, error) {
 	key := stringArg(args, 0, "key")
 	val, exists := os.LookupEnv(key)
 	return map[string]interface{}{"value": val, "exists": exists}, nil
+}
+
+// ============ Random & ID ============
+
+func uuidGen(args ...interface{}) (interface{}, error) {
+	return uuid.New().String(), nil
+}
+
+func randomInt(args ...interface{}) (interface{}, error) {
+	min, max := 0, 100
+	if len(args) >= 1 {
+		min = int(toFloat(args[0]))
+	}
+	if len(args) >= 2 {
+		max = int(toFloat(args[1]))
+	}
+	rand.Seed(time.Now().UnixNano())
+	return rand.Intn(max-min) + min, nil
+}
+
+func randomChoice(args ...interface{}) (interface{}, error) {
+	list := args[0].([]interface{})
+	if len(list) == 0 {
+		return nil, nil
+	}
+	rand.Seed(time.Now().UnixNano())
+	return list[rand.Intn(len(list))], nil
+}
+
+// ============ Encoding ============
+
+func urlEncode(args ...interface{}) (interface{}, error) {
+	s := stringArg(args, 0, "string")
+	return url.QueryEscape(s), nil
+}
+
+func urlDecode(args ...interface{}) (interface{}, error) {
+	s := stringArg(args, 0, "string")
+	decoded, err := url.QueryUnescape(s)
+	return decoded, err
+}
+
+func htmlEncode(args ...interface{}) (interface{}, error) {
+	s := stringArg(args, 0, "string")
+	// Simple HTML encoding
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&#39;")
+	return s, nil
 }
 
 // ============ JSON Functions ============
