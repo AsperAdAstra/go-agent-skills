@@ -320,13 +320,25 @@ func urlDecode(args ...interface{}) (interface{}, error) {
 
 func htmlEncode(args ...interface{}) (interface{}, error) {
 	s := stringArg(args, 0, "string")
-	// Simple HTML encoding
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, "\"", "&quot;")
-	s = strings.ReplaceAll(s, "'", "&#39;")
-	return s, nil
+	// Simple HTML encoding using strings.Builder for efficiency
+	var sb strings.Builder
+	for _, r := range s {
+		switch r {
+		case '&':
+			sb.WriteString("&amp;")
+		case '<':
+			sb.WriteString("&lt;")
+		case '>':
+			sb.WriteString("&gt;")
+		case '"':
+			sb.WriteString("&quot;")
+		case '\'':
+			sb.WriteString("&#39;")
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String(), nil
 }
 
 // ============ JSON Functions ============
