@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -26,8 +28,11 @@ import (
 )
 
 func main() {
+	prettyOutput := flag.Bool("pretty", false, "Pretty print JSON output")
+	flag.Parse()
+
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: risor-runner <script>")
+		fmt.Fprintln(os.Stderr, "Usage: risor-runner [--pretty] <script>")
 		os.Exit(1)
 	}
 
@@ -56,7 +61,6 @@ func main() {
 		risor.WithGlobal("json_parse", wrapFunc(jsonParse)),
 		risor.WithGlobal("json_stringify", wrapFunc(jsonStringify)),
 		risor.WithGlobal("json_to_yaml", wrapFunc(jsonToYaml)),
-		risor.WithGlobal("yaml_to_json", wrapFunc(yamlToJson)),
 		// String
 		risor.WithGlobal("split", wrapFunc(split)),
 		risor.WithGlobal("join", wrapFunc(join)),
@@ -76,8 +80,6 @@ func main() {
 		risor.WithGlobal("unique", wrapFunc(unique)),
 		risor.WithGlobal("flatten", wrapFunc(flatten)),
 		risor.WithGlobal("sort", wrapFunc(sortList)),
-		risor.WithGlobal("map_list", wrapFunc(mapList)),
-		risor.WithGlobal("filter_list", wrapFunc(filterList)),
 		// Math
 		risor.WithGlobal("min", wrapFunc(minVal)),
 		risor.WithGlobal("max", wrapFunc(maxVal)),
@@ -111,12 +113,12 @@ func main() {
 		risor.WithGlobal("html_encode", wrapFunc(htmlEncode)),
 	)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"%v\"}\n", err)
 		os.Exit(1)
 	}
 
 	if result != nil {
-		// Always wrap in a consistent JSON structure
+		// Always output JSON
 		outputMap := map[string]interface{}{
 			"result": toGoValue(result),
 		}
@@ -125,7 +127,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"%v\"}\n", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(output))
+		
+		if *prettyOutput {
+			var prettyJSON bytes.Buffer
+			json.Indent(&prettyJSON, output, "", "  ")
+			fmt.Println(prettyJSON.String())
+		} else {
+			fmt.Println(string(output))
+		}
 	}
 }
 
@@ -145,11 +154,32 @@ func wrapFunc(fn RisorFunc) object.Object {
 	})
 }
 
-// ============ HTTP Functions ============
+func stringArg(args []interface{}, i int, name string) string {
+	if i >= len(args) {
+		return ""
+	}
+	if s, ok := args[i].(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", args[i])
+}
 
+func toFloat(v interface{}) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int64:
+		return float64(x)
+	case int:
+		return float64(x)
+	default:
+		return 0
+	}
+}
+
+// HTTP Functions
 func httpGet(args ...interface{}) (interface{}, error) {
-	url := stringArg(args, 0, "url")
-	resp, err := http.Get(url)
+	resp, err := http.Get(stringArg(args, 0, "url"))
 	if err != nil {
 		return nil, err
 	}
@@ -159,8 +189,7 @@ func httpGet(args ...interface{}) (interface{}, error) {
 }
 
 func httpPost(args ...interface{}) (interface{}, error) {
-	url, body := stringArg(args, 0, "url"), stringArg(args, 1, "body")
-	resp, err := http.Post(url, "text/plain", strings.NewReader(body))
+	resp, err := http.Post(stringArg(args, 0, "url"), "text/plain", strings.NewReader(stringArg(args, 1, "body")))
 	if err != nil {
 		return nil, err
 	}
@@ -170,8 +199,7 @@ func httpPost(args ...interface{}) (interface{}, error) {
 }
 
 func httpPut(args ...interface{}) (interface{}, error) {
-	url, body := stringArg(args, 0, "url"), stringArg(args, 1, "body")
-	req, _ := http.NewRequest("PUT", url, strings.NewReader(body))
+	req, _ := http.NewRequest("PUT", stringArg(args, 0, "url"), strings.NewReader(stringArg(args, 1, "body")))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -183,8 +211,7 @@ func httpPut(args ...interface{}) (interface{}, error) {
 }
 
 func httpDelete(args ...interface{}) (interface{}, error) {
-	url := stringArg(args, 0, "url")
-	req, _ := http.NewRequest("DELETE", url, nil)
+	req, _ := http.NewRequest("DELETE", stringArg(args, 0, "url"), nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -195,8 +222,7 @@ func httpDelete(args ...interface{}) (interface{}, error) {
 }
 
 func httpHeaders(args ...interface{}) (interface{}, error) {
-	url := stringArg(args, 0, "url")
-	resp, err := http.Head(url)
+	resp, err := http.Head(stringArg(args, 0, "url"))
 	if err != nil {
 		return nil, err
 	}
@@ -204,11 +230,9 @@ func httpHeaders(args ...interface{}) (interface{}, error) {
 	return map[string]interface{}{"headers": resp.Header}, nil
 }
 
-// ============ File Functions ============
-
+// File Functions
 func fileRead(args ...interface{}) (interface{}, error) {
-	path := stringArg(args, 0, "path")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(stringArg(args, 0, "path"))
 	if err != nil {
 		return nil, err
 	}
@@ -216,20 +240,17 @@ func fileRead(args ...interface{}) (interface{}, error) {
 }
 
 func fileWrite(args ...interface{}) (interface{}, error) {
-	path, content := stringArg(args, 0, "path"), stringArg(args, 1, "content")
-	err := os.WriteFile(path, []byte(content), 0644)
+	err := os.WriteFile(stringArg(args, 0, "path"), []byte(stringArg(args, 1, "content")), 0644)
 	return err == nil, err
 }
 
 func fileExists(args ...interface{}) (interface{}, error) {
-	path := stringArg(args, 0, "path")
-	_, err := os.Stat(path)
+	_, err := os.Stat(stringArg(args, 0, "path"))
 	return err == nil, nil
 }
 
 func fileDelete(args ...interface{}) (interface{}, error) {
-	path := stringArg(args, 0, "path")
-	err := os.Remove(path)
+	err := os.Remove(stringArg(args, 0, "path"))
 	return err == nil, err
 }
 
@@ -249,8 +270,7 @@ func fileList(args ...interface{}) (interface{}, error) {
 	return result, nil
 }
 
-// ============ Exec & Env ============
-
+// Exec & Env
 func execCmd(args ...interface{}) (interface{}, error) {
 	cmd := stringArg(args, 0, "cmd")
 	var cmdArgs []string
@@ -268,8 +288,7 @@ func execCmd(args ...interface{}) (interface{}, error) {
 }
 
 func envGet(args ...interface{}) (interface{}, error) {
-	key := stringArg(args, 0, "key")
-	return os.Getenv(key), nil
+	return os.Getenv(stringArg(args, 0, "key")), nil
 }
 
 func envVars(args ...interface{}) (interface{}, error) {
@@ -282,91 +301,23 @@ func envVar(args ...interface{}) (interface{}, error) {
 	return map[string]interface{}{"value": val, "exists": exists}, nil
 }
 
-// ============ Random & ID ============
-
-func uuidGen(args ...interface{}) (interface{}, error) {
-	return uuid.New().String(), nil
-}
-
-func randomInt(args ...interface{}) (interface{}, error) {
-	min, max := 0, 100
-	if len(args) >= 1 {
-		min = int(toFloat(args[0]))
-	}
-	if len(args) >= 2 {
-		max = int(toFloat(args[1]))
-	}
-	rand.Seed(time.Now().UnixNano())
-	return rand.Intn(max-min) + min, nil
-}
-
-func randomChoice(args ...interface{}) (interface{}, error) {
-	list := args[0].([]interface{})
-	if len(list) == 0 {
-		return nil, nil
-	}
-	rand.Seed(time.Now().UnixNano())
-	return list[rand.Intn(len(list))], nil
-}
-
-// ============ Encoding ============
-
-func urlEncode(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	return url.QueryEscape(s), nil
-}
-
-func urlDecode(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	decoded, err := url.QueryUnescape(s)
-	return decoded, err
-}
-
-func htmlEncode(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	// Simple HTML encoding using strings.Builder for efficiency
-	var sb strings.Builder
-	for _, r := range s {
-		switch r {
-		case '&':
-			sb.WriteString("&amp;")
-		case '<':
-			sb.WriteString("&lt;")
-		case '>':
-			sb.WriteString("&gt;")
-		case '"':
-			sb.WriteString("&quot;")
-		case '\'':
-			sb.WriteString("&#39;")
-		default:
-			sb.WriteRune(r)
-		}
-	}
-	return sb.String(), nil
-}
-
-// ============ JSON Functions ============
-
+// JSON Functions
 func jsonParse(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "json")
 	var v interface{}
-	err := json.Unmarshal([]byte(s), &v)
+	err := json.Unmarshal([]byte(stringArg(args, 0, "json")), &v)
 	return v, err
 }
 
 func jsonStringify(args ...interface{}) (interface{}, error) {
-	v := args[0]
-	data, err := json.Marshal(v)
+	data, err := json.Marshal(args[0])
 	return string(data), err
 }
 
 func jsonToYaml(args ...interface{}) (interface{}, error) {
-	v := args[0]
-	data, err := json.Marshal(v)
+	data, err := json.Marshal(args[0])
 	if err != nil {
 		return nil, err
 	}
-	// Simple JSON to YAML conversion
 	var obj map[string]interface{}
 	json.Unmarshal(data, &obj)
 	return toYaml(obj, 0), nil
@@ -394,17 +345,9 @@ func toYaml(v interface{}, indent int) string {
 	}
 }
 
-func yamlToJson(args ...interface{}) (interface{}, error) {
-	// Simplified - just return as-is since Risor doesn't have native YAML
-	return args[0], nil
-}
-
-// ============ String Functions ============
-
+// String Functions
 func split(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	sep := stringArg(args, 1, "separator")
-	return strings.Split(s, sep), nil
+	return strings.Split(stringArg(args, 0, "string"), stringArg(args, 1, "separator")), nil
 }
 
 func join(args ...interface{}) (interface{}, error) {
@@ -421,8 +364,7 @@ func join(args ...interface{}) (interface{}, error) {
 }
 
 func trim(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	return strings.TrimSpace(s), nil
+	return strings.TrimSpace(stringArg(args, 0, "string")), nil
 }
 
 func upper(args ...interface{}) (interface{}, error) {
@@ -434,45 +376,31 @@ func lower(args ...interface{}) (interface{}, error) {
 }
 
 func replace(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	old, new := stringArg(args, 1, "old"), stringArg(args, 2, "new")
-	return strings.ReplaceAll(s, old, new), nil
+	return strings.ReplaceAll(stringArg(args, 0, "string"), stringArg(args, 1, "old"), stringArg(args, 2, "new")), nil
 }
 
 func regexMatch(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	pattern := stringArg(args, 1, "pattern")
-	matched, err := regexp.MatchString(pattern, s)
-	return matched, err
+	return regexp.MatchString(stringArg(args, 1, "pattern"), stringArg(args, 0, "string"))
 }
 
 func regexReplace(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	pattern, repl := stringArg(args, 1, "pattern"), stringArg(args, 2, "replacement")
-	re := regexp.MustCompile(pattern)
-	return re.ReplaceAllString(s, repl), nil
+	re := regexp.MustCompile(stringArg(args, 1, "pattern"))
+	return re.ReplaceAllString(stringArg(args, 0, "string"), stringArg(args, 2, "replacement")), nil
 }
 
 func contains(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	substr := stringArg(args, 1, "substr")
-	return strings.Contains(s, substr), nil
+	return strings.Contains(stringArg(args, 0, "string"), stringArg(args, 1, "substr")), nil
 }
 
 func startsWith(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	prefix := stringArg(args, 1, "prefix")
-	return strings.HasPrefix(s, prefix), nil
+	return strings.HasPrefix(stringArg(args, 0, "string"), stringArg(args, 1, "prefix")), nil
 }
 
 func endsWith(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "string")
-	suffix := stringArg(args, 1, "suffix")
-	return strings.HasSuffix(s, suffix), nil
+	return strings.HasSuffix(stringArg(args, 0, "string"), stringArg(args, 1, "suffix")), nil
 }
 
-// ============ List Functions ============
-
+// List Functions
 func first(args ...interface{}) (interface{}, error) {
 	list := args[0].([]interface{})
 	if len(list) == 0 {
@@ -513,9 +441,7 @@ func unique(args ...interface{}) (interface{}, error) {
 }
 
 func flatten(args ...interface{}) (interface{}, error) {
-	list := args[0].([]interface{})
-	result := flatten2(list)
-	return result, nil
+	return flatten2(args[0].([]interface{})), nil
 }
 
 func flatten2(args []interface{}) []interface{} {
@@ -540,18 +466,7 @@ func sortList(args ...interface{}) (interface{}, error) {
 	return sorted, nil
 }
 
-func mapList(args ...interface{}) (interface{}, error) {
-	// Simplified - just return the list for now
-	return args[0], nil
-}
-
-func filterList(args ...interface{}) (interface{}, error) {
-	// Simplified - just return the list for now
-	return args[0], nil
-}
-
-// ============ Math Functions ============
-
+// Math Functions
 func minVal(args ...interface{}) (interface{}, error) {
 	if len(args) < 2 {
 		return nil, fmt.Errorf("min requires at least 2 arguments")
@@ -599,37 +514,23 @@ func avgVals(args ...interface{}) (interface{}, error) {
 	return sum / float64(len(list)), nil
 }
 
-func toFloat(v interface{}) float64 {
-	switch x := v.(type) {
-	case float64:
-		return x
-	case int64:
-		return float64(x)
-	case int:
-		return float64(x)
-	default:
-		return 0
-	}
-}
-
 func roundVal(args ...interface{}) (interface{}, error) {
-	return math.Round(args[0].(float64)), nil
+	return math.Round(toFloat(args[0])), nil
 }
 
 func floorVal(args ...interface{}) (interface{}, error) {
-	return math.Floor(args[0].(float64)), nil
+	return math.Floor(toFloat(args[0])), nil
 }
 
 func ceilVal(args ...interface{}) (interface{}, error) {
-	return math.Ceil(args[0].(float64)), nil
+	return math.Ceil(toFloat(args[0])), nil
 }
 
 func absVal(args ...interface{}) (interface{}, error) {
-	return math.Abs(args[0].(float64)), nil
+	return math.Abs(toFloat(args[0])), nil
 }
 
-// ============ Time Functions ============
-
+// Time Functions
 func now(args ...interface{}) (interface{}, error) {
 	return time.Now().Format(time.RFC3339), nil
 }
@@ -639,73 +540,110 @@ func timestamp(args ...interface{}) (interface{}, error) {
 }
 
 func formatTime(args ...interface{}) (interface{}, error) {
-	ts := int64(args[0].(float64))
 	format := "2006-01-02 15:04:05"
 	if len(args) > 1 {
 		format = args[1].(string)
 	}
-	return time.Unix(ts, 0).Format(format), nil
+	return time.Unix(int64(toFloat(args[0])), 0).Format(format), nil
 }
 
 func parseTime(args ...interface{}) (interface{}, error) {
-	s := stringArg(args, 0, "time")
 	format := "2006-01-02T15:04:05Z07:00"
 	if len(args) > 1 {
 		format = args[1].(string)
 	}
-	t, err := time.Parse(format, s)
+	t, err := time.Parse(format, stringArg(args, 0, "time"))
 	if err != nil {
 		return nil, err
 	}
 	return t.Unix(), nil
 }
 
-// ============ Crypto Functions ============
-
+// Crypto Functions
 func md5Hash(args ...interface{}) (interface{}, error) {
-	data := stringArg(args, 0, "data")
-	return fmt.Sprintf("%x", md5.Sum([]byte(data))), nil
+	return fmt.Sprintf("%x", md5.Sum([]byte(stringArg(args, 0, "data")))), nil
 }
 
 func sha256Hash(args ...interface{}) (interface{}, error) {
-	data := stringArg(args, 0, "data")
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(data))), nil
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(stringArg(args, 0, "data")))), nil
 }
 
 func base64Encode(args ...interface{}) (interface{}, error) {
-	data := stringArg(args, 0, "data")
-	return base64.StdEncoding.EncodeToString([]byte(data)), nil
+	return base64.StdEncoding.EncodeToString([]byte(stringArg(args, 0, "data"))), nil
 }
 
 func base64Decode(args ...interface{}) (interface{}, error) {
-	data := stringArg(args, 0, "data")
-	decoded, err := base64.StdEncoding.DecodeString(data)
+	decoded, err := base64.StdEncoding.DecodeString(stringArg(args, 0, "data"))
 	return string(decoded), err
 }
 
-// ============ System Functions ============
-
+// System Functions
 func osName(args ...interface{}) (interface{}, error) {
 	return runtime.GOOS, nil
 }
 
 func hostname(args ...interface{}) (interface{}, error) {
-	name, err := os.Hostname()
-	return name, err
+	return os.Hostname()
 }
 
-// ============ Helpers ============
-
-func stringArg(args []interface{}, i int, name string) string {
-	if i >= len(args) {
-		return ""
-	}
-	if s, ok := args[i].(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", args[i])
+// Random & ID
+func uuidGen(args ...interface{}) (interface{}, error) {
+	return uuid.New().String(), nil
 }
 
+func randomInt(args ...interface{}) (interface{}, error) {
+	min, max := 0, 100
+	if len(args) >= 1 {
+		min = int(toFloat(args[0]))
+	}
+	if len(args) >= 2 {
+		max = int(toFloat(args[1]))
+	}
+	rand.Seed(time.Now().UnixNano())
+	return rand.Intn(max-min) + min, nil
+}
+
+func randomChoice(args ...interface{}) (interface{}, error) {
+	list := args[0].([]interface{})
+	if len(list) == 0 {
+		return nil, nil
+	}
+	rand.Seed(time.Now().UnixNano())
+	return list[rand.Intn(len(list))], nil
+}
+
+// Encoding
+func urlEncode(args ...interface{}) (interface{}, error) {
+	return url.QueryEscape(stringArg(args, 0, "string")), nil
+}
+
+func urlDecode(args ...interface{}) (interface{}, error) {
+	return url.QueryUnescape(stringArg(args, 0, "string"))
+}
+
+func htmlEncode(args ...interface{}) (interface{}, error) {
+	s := stringArg(args, 0, "string")
+	var sb strings.Builder
+	for _, r := range s {
+		switch r {
+		case '&':
+			sb.WriteString("&amp;")
+		case '<':
+			sb.WriteString("&lt;")
+		case '>':
+			sb.WriteString("&gt;")
+		case '"':
+			sb.WriteString("&quot;")
+		case '\'':
+			sb.WriteString("&#39;")
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String(), nil
+}
+
+// Helpers
 func toGoValue(result object.Object) interface{} {
 	switch result.Type() {
 	case object.STRING:
