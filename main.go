@@ -32,14 +32,25 @@ import (
 func main() {
 	prettyOutput := flag.Bool("pretty", false, "Pretty print JSON output")
 	profile := flag.String("profile", "core", "Execution profile: core, io, admin")
+	scriptFile := flag.String("file", "", "Path to script file to execute")
 	flag.Parse()
 
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: risor-runner [--pretty] <script>")
+	if *scriptFile == "" && flag.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: risor-runner [--pretty] [--profile core|io|admin] [--file <path>] <script>")
 		os.Exit(1)
 	}
 
-	script := os.Args[1]
+	var script string
+	if *scriptFile != "" {
+		data, err := os.ReadFile(*scriptFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"failed to read script file: %v\"}\n", err)
+			os.Exit(1)
+		}
+		script = string(data)
+	} else {
+		script = flag.Arg(0)
+	}
 
 	ctx := context.Background()
 
