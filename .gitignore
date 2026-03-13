@@ -1,0 +1,20 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+bin/
+dist/
+build/
+
+
+# Configurations & temporary files
+*.publish
+.idea/
+.vscode/
+.log
+tmp/
