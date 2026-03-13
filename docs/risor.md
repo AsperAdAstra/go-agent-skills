@@ -10,7 +10,7 @@ Risor is an embedded scripting language for Go. This runner includes custom func
 ## Usage
 ```bash
 # Run a one-liner
-~/go/bin/risor-runner 'print(1 + 1)'
+~/go/bin/risor-runner '1 + 1'
 
 # Run a script file
 ~/go/bin/risor-runner -f script.risor
@@ -21,25 +21,22 @@ Risor is an embedded scripting language for Go. This runner includes custom func
 
 ## Important Constraints
 
-### No Variable Assignment
-You cannot assign to variables. Use direct chaining instead:
-```rison
-# ❌ Doesn't work
-r = http_get("https://example.com")
-print(r.body)
-
-# ✅ Works
-print(http_get("https://example.com").body)
-```
-
-### No Loops
-For-loops and list comprehensions are not available. Work with collections directly.
+- Risor v2 is **sandboxed by default**. The runner starts from `risor.Builtins()` and only adds a curated set of extra helpers.
+- Scripts are **expressions and small scripts**, not general-purpose programs.
 
 ---
 
-## Available Functions
+## Profiles & Capabilities
 
-### HTTP Functions
+The runner supports three execution profiles via `--profile`:
+
+- `core` (default): pure computation, string/list/math/time, JSON, crypto, random, encoding. **No HTTP, filesystem, or exec.**
+- `io`: everything in `core` plus HTTP and filesystem helpers.
+- `admin`: everything in `io` plus `exec_cmd` and full environment/system helpers. Intended only for trusted scripts.
+
+## Available Functions (by profile)
+
+### HTTP Functions (profiles: `io`, `admin`)
 
 #### `http_get(url string) -> response`
 Make a GET request. Returns a response object with:
@@ -62,7 +59,7 @@ print(http_post("https://httpbin.org/post", "{\"test\":1}").status)
 
 ---
 
-### File Functions
+### File Functions (profiles: `io`, `admin`)
 
 #### `file_exists(path string) -> bool`
 Check if a file exists.
@@ -88,7 +85,7 @@ print(file_read("/tmp/output.txt"))
 
 ---
 
-### Environment Functions
+### Environment & System Functions (profile: `admin`)
 
 #### `env_get(key string) -> string`
 Get an environment variable.
@@ -99,7 +96,7 @@ print(env_get("HOME"))
 
 ---
 
-### JSON Functions
+### JSON Functions (all profiles)
 
 #### `json_parse(str string) -> object`
 Parse JSON string to Risor object.
@@ -117,7 +114,7 @@ print(json.marshal({"a": 1, "b": "hello"}))
 
 ---
 
-### Time Functions
+### Time Functions (all profiles)
 
 #### `time.now() -> time`
 Get current time.
@@ -137,7 +134,7 @@ print(time.now().format("Jan 2, 2006"))        # Mar 13, 2026
 
 ---
 
-### String Functions (strings module)
+### String Functions (all profiles)
 
 #### `strings.contains(s string, substr string) -> bool`
 
@@ -153,7 +150,7 @@ print(strings.split("a,b,c", ","))  # ["a", "b", "c"]
 
 ---
 
-### Math Functions (math module)
+### Math Functions (all profiles)
 
 ```risor
 print(math.abs(-5))     # 5

@@ -22,13 +22,16 @@ import (
 	"strings"
 	"time"
 
+	"reflect"
+
+	"github.com/deepnoodle-ai/risor/v2"
+	"github.com/deepnoodle-ai/risor/v2/pkg/object"
 	"github.com/google/uuid"
-	"github.com/risor-io/risor"
-	"github.com/risor-io/risor/object"
 )
 
 func main() {
 	prettyOutput := flag.Bool("pretty", false, "Pretty print JSON output")
+	profile := flag.String("profile", "core", "Execution profile: core, io, admin")
 	flag.Parse()
 
 	if len(os.Args) < 2 {
@@ -40,78 +43,87 @@ func main() {
 
 	ctx := context.Background()
 
-	result, err := risor.Eval(ctx, script,
-		// HTTP
-		risor.WithGlobal("http_get", wrapFunc(httpGet)),
-		risor.WithGlobal("http_post", wrapFunc(httpPost)),
-		risor.WithGlobal("http_put", wrapFunc(httpPut)),
-		risor.WithGlobal("http_delete", wrapFunc(httpDelete)),
-		risor.WithGlobal("http_headers", wrapFunc(httpHeaders)),
-		// File
-		risor.WithGlobal("file_read", wrapFunc(fileRead)),
-		risor.WithGlobal("file_write", wrapFunc(fileWrite)),
-		risor.WithGlobal("file_exists", wrapFunc(fileExists)),
-		risor.WithGlobal("file_delete", wrapFunc(fileDelete)),
-		risor.WithGlobal("file_list", wrapFunc(fileList)),
-		// Exec & Env
-		risor.WithGlobal("exec_cmd", wrapFunc(execCmd)),
-		risor.WithGlobal("env_get", wrapFunc(envGet)),
-		risor.WithGlobal("env_vars", wrapFunc(envVars)),
-		// JSON
-		risor.WithGlobal("json_parse", wrapFunc(jsonParse)),
-		risor.WithGlobal("json_stringify", wrapFunc(jsonStringify)),
-		risor.WithGlobal("json_to_yaml", wrapFunc(jsonToYaml)),
-		// String
-		risor.WithGlobal("split", wrapFunc(split)),
-		risor.WithGlobal("join", wrapFunc(join)),
-		risor.WithGlobal("trim", wrapFunc(trim)),
-		risor.WithGlobal("upper", wrapFunc(upper)),
-		risor.WithGlobal("lower", wrapFunc(lower)),
-		risor.WithGlobal("replace", wrapFunc(replace)),
-		risor.WithGlobal("regex_match", wrapFunc(regexMatch)),
-		risor.WithGlobal("regex_replace", wrapFunc(regexReplace)),
-		risor.WithGlobal("contains", wrapFunc(contains)),
-		risor.WithGlobal("starts_with", wrapFunc(startsWith)),
-		risor.WithGlobal("ends_with", wrapFunc(endsWith)),
-		// List
-		risor.WithGlobal("first", wrapFunc(first)),
-		risor.WithGlobal("last", wrapFunc(last)),
-		risor.WithGlobal("reverse", wrapFunc(reverseList)),
-		risor.WithGlobal("unique", wrapFunc(unique)),
-		risor.WithGlobal("flatten", wrapFunc(flatten)),
-		risor.WithGlobal("sort", wrapFunc(sortList)),
-		// Math
-		risor.WithGlobal("min", wrapFunc(minVal)),
-		risor.WithGlobal("max", wrapFunc(maxVal)),
-		risor.WithGlobal("sum", wrapFunc(sumVals)),
-		risor.WithGlobal("avg", wrapFunc(avgVals)),
-		risor.WithGlobal("round_val", wrapFunc(roundVal)),
-		risor.WithGlobal("floor_val", wrapFunc(floorVal)),
-		risor.WithGlobal("ceil_val", wrapFunc(ceilVal)),
-		risor.WithGlobal("abs_val", wrapFunc(absVal)),
-		// Time
-		risor.WithGlobal("now", wrapFunc(now)),
-		risor.WithGlobal("timestamp", wrapFunc(timestamp)),
-		risor.WithGlobal("format_time", wrapFunc(formatTime)),
-		risor.WithGlobal("parse_time", wrapFunc(parseTime)),
-		// Crypto
-		risor.WithGlobal("md5_hash", wrapFunc(md5Hash)),
-		risor.WithGlobal("sha256_hash", wrapFunc(sha256Hash)),
-		risor.WithGlobal("base64_encode", wrapFunc(base64Encode)),
-		risor.WithGlobal("base64_decode", wrapFunc(base64Decode)),
-		// System
-		risor.WithGlobal("os_name", wrapFunc(osName)),
-		risor.WithGlobal("hostname", wrapFunc(hostname)),
-		risor.WithGlobal("env_var", wrapFunc(envVar)),
-		// Random & ID
-		risor.WithGlobal("uuid", wrapFunc(uuidGen)),
-		risor.WithGlobal("random_int", wrapFunc(randomInt)),
-		risor.WithGlobal("random_choice", wrapFunc(randomChoice)),
-		// Encoding
-		risor.WithGlobal("url_encode", wrapFunc(urlEncode)),
-		risor.WithGlobal("url_decode", wrapFunc(urlDecode)),
-		risor.WithGlobal("html_encode", wrapFunc(htmlEncode)),
-	)
+	// Start from the standard library builtins, then explicitly add our functions
+	// based on the selected security profile.
+	env := risor.Builtins()
+
+	// Core-safe builtins (always enabled)
+	env["json_parse"] = wrapFunc(jsonParse)
+	env["json_stringify"] = wrapFunc(jsonStringify)
+	env["json_to_yaml"] = wrapFunc(jsonToYaml)
+
+	env["split"] = wrapFunc(split)
+	env["join"] = wrapFunc(join)
+	env["trim"] = wrapFunc(trim)
+	env["upper"] = wrapFunc(upper)
+	env["lower"] = wrapFunc(lower)
+	env["replace"] = wrapFunc(replace)
+	env["regex_match"] = wrapFunc(regexMatch)
+	env["regex_replace"] = wrapFunc(regexReplace)
+	env["contains"] = wrapFunc(contains)
+	env["starts_with"] = wrapFunc(startsWith)
+	env["ends_with"] = wrapFunc(endsWith)
+
+	env["first"] = wrapFunc(first)
+	env["last"] = wrapFunc(last)
+	env["reverse"] = wrapFunc(reverseList)
+	env["unique"] = wrapFunc(unique)
+	env["flatten"] = wrapFunc(flatten)
+	env["sort"] = wrapFunc(sortList)
+
+	env["min"] = wrapFunc(minVal)
+	env["max"] = wrapFunc(maxVal)
+	env["sum"] = wrapFunc(sumVals)
+	env["avg"] = wrapFunc(avgVals)
+	env["round_val"] = wrapFunc(roundVal)
+	env["floor_val"] = wrapFunc(floorVal)
+	env["ceil_val"] = wrapFunc(ceilVal)
+	env["abs_val"] = wrapFunc(absVal)
+
+	env["now"] = wrapFunc(now)
+	env["timestamp"] = wrapFunc(timestamp)
+	env["format_time"] = wrapFunc(formatTime)
+	env["parse_time"] = wrapFunc(parseTime)
+
+	env["md5_hash"] = wrapFunc(md5Hash)
+	env["sha256_hash"] = wrapFunc(sha256Hash)
+	env["base64_encode"] = wrapFunc(base64Encode)
+	env["base64_decode"] = wrapFunc(base64Decode)
+
+	env["uuid"] = wrapFunc(uuidGen)
+	env["random_int"] = wrapFunc(randomInt)
+	env["random_choice"] = wrapFunc(randomChoice)
+
+	env["url_encode"] = wrapFunc(urlEncode)
+	env["url_decode"] = wrapFunc(urlDecode)
+	env["html_encode"] = wrapFunc(htmlEncode)
+
+	// Guarded I/O: enabled for profiles "io" and "admin"
+	if *profile == "io" || *profile == "admin" {
+		env["http_get"] = wrapFunc(httpGet)
+		env["http_post"] = wrapFunc(httpPost)
+		env["http_put"] = wrapFunc(httpPut)
+		env["http_delete"] = wrapFunc(httpDelete)
+		env["http_headers"] = wrapFunc(httpHeaders)
+
+		env["file_read"] = wrapFunc(fileRead)
+		env["file_write"] = wrapFunc(fileWrite)
+		env["file_exists"] = wrapFunc(fileExists)
+		env["file_delete"] = wrapFunc(fileDelete)
+		env["file_list"] = wrapFunc(fileList)
+	}
+
+	// Dangerous / admin-only capabilities
+	if *profile == "admin" {
+		env["exec_cmd"] = wrapFunc(execCmd)
+		env["env_get"] = wrapFunc(envGet)
+		env["env_vars"] = wrapFunc(envVars)
+		env["os_name"] = wrapFunc(osName)
+		env["hostname"] = wrapFunc(hostname)
+		env["env_var"] = wrapFunc(envVar)
+	}
+
+	result, err := risor.Eval(ctx, script, risor.WithEnv(env))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"%v\"}\n", err)
 		os.Exit(1)
@@ -120,7 +132,7 @@ func main() {
 	if result != nil {
 		// Always output JSON
 		outputMap := map[string]interface{}{
-			"result": toGoValue(result),
+			"result": result,
 		}
 		output, err := json.Marshal(outputMap)
 		if err != nil {
@@ -140,18 +152,10 @@ func main() {
 
 type RisorFunc func(args ...interface{}) (interface{}, error)
 
+var defaultRegistry = risor.NewTypeRegistry().Build()
+
 func wrapFunc(fn RisorFunc) object.Object {
-	return object.NewBuiltin(fmt.Sprintf("fn_%p", fn), func(ctx context.Context, args ...object.Object) object.Object {
-		goArgs := make([]interface{}, len(args))
-		for i, a := range args {
-			goArgs[i] = toGoValue(a)
-		}
-		result, err := fn(goArgs...)
-		if err != nil {
-			return object.NewError(fmt.Errorf("%v", err))
-		}
-		return toObject(result)
-	})
+	return object.NewGoFunc(reflect.ValueOf(fn), "builtin", defaultRegistry)
 }
 
 func stringArg(args []interface{}, i int, name string) string {
@@ -641,69 +645,4 @@ func htmlEncode(args ...interface{}) (interface{}, error) {
 		}
 	}
 	return sb.String(), nil
-}
-
-// Helpers
-func toGoValue(result object.Object) interface{} {
-	switch result.Type() {
-	case object.STRING:
-		return result.(*object.String).Value()
-	case object.INT:
-		return result.(*object.Int).Value()
-	case object.FLOAT:
-		return result.(*object.Float).Value()
-	case object.BOOL:
-		return result.(*object.Bool).Value()
-	case object.LIST:
-		list := result.(*object.List)
-		items := list.Value()
-		res := make([]interface{}, 0, len(items))
-		for _, item := range items {
-			res = append(res, toGoValue(item))
-		}
-		return res
-	case object.MAP:
-		m := result.(*object.Map)
-		pairs := m.Value()
-		res := make(map[string]interface{})
-		for key, val := range pairs {
-			res[key] = toGoValue(val)
-		}
-		return res
-	case object.NIL:
-		return nil
-	default:
-		return result.Inspect()
-	}
-}
-
-func toObject(v interface{}) object.Object {
-	switch x := v.(type) {
-	case string:
-		return object.NewString(x)
-	case float64:
-		return object.NewFloat(x)
-	case bool:
-		return object.NewBool(x)
-	case nil:
-		return &object.NilType{}
-	case int:
-		return object.NewInt(int64(x))
-	case int64:
-		return object.NewInt(x)
-	case []interface{}:
-		items := make([]object.Object, len(x))
-		for i, item := range x {
-			items[i] = toObject(item)
-		}
-		return object.NewList(items)
-	case map[string]interface{}:
-		m := make(map[string]object.Object)
-		for k, val := range x {
-			m[k] = toObject(val)
-		}
-		return object.NewMap(m)
-	default:
-		return object.NewString(fmt.Sprintf("%v", v))
-	}
 }
