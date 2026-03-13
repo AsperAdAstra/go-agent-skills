@@ -31,12 +31,12 @@ func main() {
 	prettyOutput := flag.Bool("pretty", false, "Pretty print JSON output")
 	flag.Parse()
 
-	if len(os.Args) < 2 {
+	if flag.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "Usage: risor-runner [--pretty] <script>")
 		os.Exit(1)
 	}
 
-	script := os.Args[1]
+	script := flag.Arg(0)
 
 	ctx := context.Background()
 
@@ -199,7 +199,10 @@ func httpPost(args ...interface{}) (interface{}, error) {
 }
 
 func httpPut(args ...interface{}) (interface{}, error) {
-	req, _ := http.NewRequest("PUT", stringArg(args, 0, "url"), strings.NewReader(stringArg(args, 1, "body")))
+	req, err := http.NewRequest("PUT", stringArg(args, 0, "url"), strings.NewReader(stringArg(args, 1, "body")))
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -211,7 +214,10 @@ func httpPut(args ...interface{}) (interface{}, error) {
 }
 
 func httpDelete(args ...interface{}) (interface{}, error) {
-	req, _ := http.NewRequest("DELETE", stringArg(args, 0, "url"), nil)
+	req, err := http.NewRequest("DELETE", stringArg(args, 0, "url"), nil)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -319,7 +325,9 @@ func jsonToYaml(args ...interface{}) (interface{}, error) {
 		return nil, err
 	}
 	var obj map[string]interface{}
-	json.Unmarshal(data, &obj)
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return nil, err
+	}
 	return toYaml(obj, 0), nil
 }
 
@@ -599,7 +607,6 @@ func randomInt(args ...interface{}) (interface{}, error) {
 	if len(args) >= 2 {
 		max = int(toFloat(args[1]))
 	}
-	rand.Seed(time.Now().UnixNano())
 	return rand.Intn(max-min) + min, nil
 }
 
@@ -608,7 +615,6 @@ func randomChoice(args ...interface{}) (interface{}, error) {
 	if len(list) == 0 {
 		return nil, nil
 	}
-	rand.Seed(time.Now().UnixNano())
 	return list[rand.Intn(len(list))], nil
 }
 

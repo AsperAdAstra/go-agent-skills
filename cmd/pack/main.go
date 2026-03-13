@@ -88,19 +88,15 @@ func Pack(skillPath, outputPath string) (PackResult, error) {
 			Name:   relPath,
 			Method: zip.Deflate,
 		}
-		if info.IsDir() {
-			header.Name += "/"
-		}
-		
 		f, err := writer.CreateHeader(header)
 		if err != nil {
 			return err
 		}
 
-		if !info.IsDir() {
-			f.Write(data)
-			result.FileCount++
+		if _, err := f.Write(data); err != nil {
+			return err
 		}
+		result.FileCount++
 
 		return nil
 	})
