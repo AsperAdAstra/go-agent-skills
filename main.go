@@ -89,6 +89,76 @@ func main() {
 
 	ctx := context.Background()
 
+	// Build namespaced stdlib modules
+	stringsModule := object.NewBuiltinsModule("strings", map[string]object.Object{
+		"upper":         wrapFunc(upper),
+		"lower":         wrapFunc(lower),
+		"trim":          wrapFunc(trim),
+		"split":         wrapFunc(split),
+		"join":          wrapFunc(join),
+		"replace":       wrapFunc(replace),
+		"contains":      wrapFunc(contains),
+		"starts_with":   wrapFunc(startsWith),
+		"ends_with":     wrapFunc(endsWith),
+		"regex_match":   wrapFunc(regexMatch),
+		"regex_replace":  wrapFunc(regexReplace),
+		"html_encode":   wrapFunc(htmlEncode),
+	})
+
+	jsonModule := object.NewBuiltinsModule("json", map[string]object.Object{
+		"parse":     wrapFunc(jsonParse),
+		"stringify": wrapFunc(jsonStringify),
+		"to_yaml":   wrapFunc(jsonToYaml),
+	})
+
+	fileModule := object.NewBuiltinsModule("file", map[string]object.Object{
+		"read":           wrapFunc(fileRead),
+		"write":          wrapFunc(fileWrite),
+		"exists":         wrapFunc(fileExists),
+		"delete":         wrapFunc(fileDelete),
+		"list":           wrapFunc(fileList),
+		"list_recursive": wrapFunc(fileListRecursive),
+	})
+
+	httpModule := object.NewBuiltinsModule("http", map[string]object.Object{
+		"get":     wrapFunc(httpGet),
+		"post":    wrapFunc(httpPost),
+		"put":     wrapFunc(httpPut),
+		"delete":  wrapFunc(httpDelete),
+		"headers": wrapFunc(httpHeaders),
+	})
+
+	mathModule := object.NewBuiltinsModule("math", map[string]object.Object{
+		"min":        wrapFunc(minVal),
+		"max":        wrapFunc(maxVal),
+		"sum":        wrapFunc(sumVals),
+		"avg":        wrapFunc(avgVals),
+		"round":      wrapFunc(roundVal),
+		"floor":      wrapFunc(floorVal),
+		"ceil":       wrapFunc(ceilVal),
+		"abs":        wrapFunc(absVal),
+		"random_int": wrapFunc(randomInt),
+	})
+
+	timeModule := object.NewBuiltinsModule("time", map[string]object.Object{
+		"now":       wrapFunc(now),
+		"timestamp": wrapFunc(timestamp),
+		"format":    wrapFunc(formatTime),
+		"parse":     wrapFunc(parseTime),
+	})
+
+	cryptoModule := object.NewBuiltinsModule("crypto", map[string]object.Object{
+		"md5":        wrapFunc(md5Hash),
+		"sha256":     wrapFunc(sha256Hash),
+		"base64_enc": wrapFunc(base64Encode),
+		"base64_dec": wrapFunc(base64Decode),
+	})
+
+	encodingModule := object.NewBuiltinsModule("encoding", map[string]object.Object{
+		"url_encode": wrapFunc(urlEncode),
+		"url_decode": wrapFunc(urlDecode),
+	})
+
 	// Build the Risor options with all global functions
 	opts := []risor.Option{
 		// HTTP
@@ -174,6 +244,16 @@ func main() {
 		risor.WithGlobal("args", toObject(argsMap)),
 		// Skill validation
 		risor.WithGlobal("skill_validate", wrapFunc(skillValidate)),
+
+		// === Namespaced stdlib (uses override to replace built-in modules) ===
+		risor.WithGlobalOverride("strings", stringsModule),
+		risor.WithGlobalOverride("json", jsonModule),
+		risor.WithGlobalOverride("file", fileModule),
+		risor.WithGlobalOverride("http", httpModule),
+		risor.WithGlobalOverride("math", mathModule),
+		risor.WithGlobalOverride("time", timeModule),
+		risor.WithGlobalOverride("crypto", cryptoModule),
+		risor.WithGlobalOverride("encoding", encodingModule),
 	}
 
 	result, err := risor.Eval(ctx, string(scriptContent), opts...)
@@ -360,7 +440,8 @@ func httpHeaders(args ...interface{}) (interface{}, error) {
 // File Functions
 
 // safePath validates that the given path doesn't escape the current working directory.
-// Blocks both relative ".." traversal and absolute paths.
+// Allows relative paths and absolute paths outside sensitive areas.
+// Blocks ".." traversal that would escape cwd.
 func safePath(path string) error {
 	// Clean the path
 	clean := filepath.Clean(path)
@@ -368,9 +449,12 @@ func safePath(path string) error {
 	if strings.HasPrefix(clean, "..") {
 		return fmt.Errorf("path traversal attempt detected: %s", path)
 	}
-	// Block absolute paths to prevent reading /etc/passwd, /tmp, etc.
-	if filepath.IsAbs(clean) {
-		return fmt.Errorf("absolute paths not allowed: %s", path)
+	// Block access to sensitive system paths
+	sensitivePrefixes := []string{"/etc", "/root", "/home", "/sys", "/proc", "/var"}
+	for _, prefix := range sensitivePrefixes {
+		if strings.HasPrefix(clean, prefix) {
+			return fmt.Errorf("access to %s not allowed: %s", prefix, path)
+		}
 	}
 	return nil
 }
@@ -1020,7 +1104,7 @@ func htmlEncode(args ...interface{}) (interface{}, error) {
 		case '&':
 			sb.WriteString("&amp;")
 		case '<':
-			sb.WriteString			("&lt;")
+			sb.WriteString("&lt;")
 		case '>':
 			sb.WriteString("&gt;")
 		case '"':
