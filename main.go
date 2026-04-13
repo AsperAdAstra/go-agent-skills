@@ -28,20 +28,69 @@ import (
 	"github.com/risor-io/risor/object"
 )
 
+// Global flag variables
+var (
+	prettyOutput bool
+	cleanOutput  bool
+	scriptFile   string
+	scriptArgs   []string // "key=value" arguments passed to script
+)
+
+func init() {
+	flag.BoolVar(&prettyOutput, "pretty", false, "Pretty print JSON output")
+	flag.BoolVar(&cleanOutput, "clean", false, "Output raw result value without JSON wrapper")
+	flag.StringVar(&scriptFile, "f", "", "Path to script file to execute")
+}
+
 func main() {
-	prettyOutput := flag.Bool("pretty", false, "Pretty print JSON output")
 	flag.Parse()
 
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: risor-runner [--pretty] <script>")
-		os.Exit(1)
+	// Collect remaining non-flag arguments as script input
+	// These are "key=value" pairs that become script globals
+	scriptArgs = flag.Args()
+
+	// Determine what to execute: script file or inline script
+	var scriptContent string
+	var err error
+
+	if scriptFile != "" {
+		// Read script from file
+		if err := safePath(scriptFile); err != nil {
+			fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"%v\"}\n", err)
+			os.Exit(1)
+		}
+		data, err := os.ReadFile(scriptFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"failed to read script file: %v\"}\n", err)
+			os.Exit(1)
+		}
+		scriptContent = string(data)
+	} else {
+		// Use inline script from first non-flag argument
+		if len(scriptArgs) < 1 {
+			fmt.Fprintln(os.Stderr, "Usage: risor-runner [--pretty] [--clean] [-f <script_file>] [<script>] [key=value ...]")
+			fmt.Fprintln(os.Stderr, "  --pretty         Pretty print JSON output")
+			fmt.Fprintln(os.Stderr, "  --clean          Output raw result without JSON wrapper")
+			fmt.Fprintln(os.Stderr, "  -f <file>        Execute script from file")
+			fmt.Fprintln(os.Stderr, "  key=value        Arguments available as 'args' map in script")
+			os.Exit(1)
+		}
+		scriptContent = scriptArgs[0]
+		// Remaining args after the script are key=value pairs
+		if len(scriptArgs) > 1 {
+			scriptArgs = scriptArgs[1:]
+		} else {
+			scriptArgs = []string{}
+		}
 	}
 
-	script := os.Args[1]
+	// Parse script arguments into a map for the script
+	argsMap := parseScriptArgs(scriptArgs)
 
 	ctx := context.Background()
 
-	result, err := risor.Eval(ctx, script,
+	// Build the Risor options with all global functions
+	opts := []risor.Option{
 		// HTTP
 		risor.WithGlobal("http_get", wrapFunc(httpGet)),
 		risor.WithGlobal("http_post", wrapFunc(httpPost)),
@@ -54,10 +103,13 @@ func main() {
 		risor.WithGlobal("file_exists", wrapFunc(fileExists)),
 		risor.WithGlobal("file_delete", wrapFunc(fileDelete)),
 		risor.WithGlobal("file_list", wrapFunc(fileList)),
+		risor.WithGlobal("file_list_recursive", wrapFunc(fileListRecursive)),
 		// Exec & Env
 		risor.WithGlobal("exec_cmd", wrapFunc(execCmd)),
 		risor.WithGlobal("env_get", wrapFunc(envGet)),
+		risor.WithGlobal("env_set", wrapFunc(envSet)),
 		risor.WithGlobal("env_vars", wrapFunc(envVars)),
+		risor.WithGlobal("env_var", wrapFunc(envVar)),
 		// JSON
 		risor.WithGlobal("json_parse", wrapFunc(jsonParse)),
 		risor.WithGlobal("json_stringify", wrapFunc(jsonStringify)),
@@ -103,7 +155,6 @@ func main() {
 		// System
 		risor.WithGlobal("os_name", wrapFunc(osName)),
 		risor.WithGlobal("hostname", wrapFunc(hostname)),
-		risor.WithGlobal("env_var", wrapFunc(envVar)),
 		// Random & ID
 		risor.WithGlobal("uuid", wrapFunc(uuidGen)),
 		risor.WithGlobal("random_int", wrapFunc(randomInt)),
@@ -112,31 +163,88 @@ func main() {
 		risor.WithGlobal("url_encode", wrapFunc(urlEncode)),
 		risor.WithGlobal("url_decode", wrapFunc(urlDecode)),
 		risor.WithGlobal("html_encode", wrapFunc(htmlEncode)),
-	)
+		// Logging (structured, outputs to stderr)
+		risor.WithGlobal("log_debug", wrapFunc(logDebug)),
+		risor.WithGlobal("log_info", wrapFunc(logInfo)),
+		risor.WithGlobal("log_warn", wrapFunc(logWarn)),
+		risor.WithGlobal("log_error", wrapFunc(logError)),
+		// Template
+		risor.WithGlobal("template_render", wrapFunc(templateRender)),
+		// Script arguments (key=value pairs)
+		risor.WithGlobal("args", toObject(argsMap)),
+		// Skill validation
+		risor.WithGlobal("skill_validate", wrapFunc(skillValidate)),
+	}
+
+	result, err := risor.Eval(ctx, string(scriptContent), opts...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"%v\"}\n", err)
+		if cleanOutput {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"%v\"}\n", err)
+		}
 		os.Exit(1)
 	}
 
 	if result != nil {
-		// Always output JSON
-		outputMap := map[string]interface{}{
-			"result": toGoValue(result),
-		}
-		output, err := json.Marshal(outputMap)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"%v\"}\n", err)
-			os.Exit(1)
-		}
-		
-		if *prettyOutput {
-			var prettyJSON bytes.Buffer
-			json.Indent(&prettyJSON, output, "", "  ")
-			fmt.Println(prettyJSON.String())
+		resultVal := toGoValue(result)
+
+		if cleanOutput {
+			// Just print the raw result value
+			if resultVal == nil {
+				// No output for nil
+			} else if str, ok := resultVal.(string); ok {
+				fmt.Print(str)
+			} else {
+				// For non-strings in clean mode, print JSON (but unwrapped)
+				output, err := json.Marshal(resultVal)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[ERROR] failed to marshal result: %v\n", err)
+					os.Exit(1)
+				}
+				fmt.Println(string(output))
+			}
 		} else {
-			fmt.Println(string(output))
+			// Standard JSON wrapped output
+			outputMap := map[string]interface{}{
+				"result": resultVal,
+			}
+			output, err := json.Marshal(outputMap)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "{\"status\": \"error\", \"error\": \"%v\"}\n", err)
+				os.Exit(1)
+			}
+
+			if prettyOutput {
+				var prettyJSON bytes.Buffer
+				json.Indent(&prettyJSON, output, "", "  ")
+				fmt.Println(prettyJSON.String())
+			} else {
+				fmt.Println(string(output))
+			}
 		}
 	}
+}
+
+// parseScriptArgs converts "key=value" arguments into a map.
+// Also populates argv list for positional access.
+func parseScriptArgs(args []string) map[string]interface{} {
+	result := make(map[string]interface{})
+	var argv []interface{}
+
+	for _, arg := range args {
+		argv = append(argv, arg)
+		if strings.Contains(arg, "=") {
+			parts := strings.SplitN(arg, "=", 2)
+			if len(parts) == 2 {
+				result[parts[0]] = parts[1]
+			}
+		}
+	}
+
+	// Add argv as a list for positional access
+	result["argv"] = argv
+	return result
 }
 
 type RisorFunc func(args ...interface{}) (interface{}, error)
@@ -325,6 +433,47 @@ func fileList(args ...interface{}) (interface{}, error) {
 	return result, nil
 }
 
+// fileListRecursive returns detailed info about files in a directory tree.
+// Returns list of {name, path, is_file, is_dir, size} maps.
+func fileListRecursive(args ...interface{}) (interface{}, error) {
+	dir := "."
+	if len(args) > 0 {
+		dir = args[0].(string)
+	}
+	if err := safePath(dir); err != nil {
+		return nil, err
+	}
+
+	var results []map[string]interface{}
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Skip the root dir itself, just include its contents
+		if path == dir {
+			return nil
+		}
+
+		relPath, _ := filepath.Rel(dir, path)
+		entry := map[string]interface{}{
+			"name":    info.Name(),
+			"path":    relPath,
+			"is_file": info.Mode().IsRegular(),
+			"is_dir":  info.IsDir(),
+			"size":    info.Size(),
+		}
+		results = append(results, entry)
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
 // Exec & Env
 func execCmd(args ...interface{}) (interface{}, error) {
 	cmd := stringArg(args, 0, "cmd")
@@ -349,6 +498,12 @@ func envGet(args ...interface{}) (interface{}, error) {
 	return os.Getenv(stringArg(args, 0, "key")), nil
 }
 
+func envSet(args ...interface{}) (interface{}, error) {
+	key := stringArg(args, 0, "key")
+	val := stringArg(args, 1, "value")
+	return nil, os.Setenv(key, val)
+}
+
 func envVars(args ...interface{}) (interface{}, error) {
 	return os.Environ(), nil
 }
@@ -357,6 +512,177 @@ func envVar(args ...interface{}) (interface{}, error) {
 	key := stringArg(args, 0, "key")
 	val, exists := os.LookupEnv(key)
 	return map[string]interface{}{"value": val, "exists": exists}, nil
+}
+
+// Logging Functions (structured, output to stderr with level prefixes)
+func logDebug(args ...interface{}) (interface{}, error) {
+	msg := formatLogArgs(args...)
+	fmt.Fprintf(os.Stderr, "[DEBUG] %s\n", msg)
+	return nil, nil
+}
+
+func logInfo(args ...interface{}) (interface{}, error) {
+	msg := formatLogArgs(args...)
+	fmt.Fprintf(os.Stderr, "[INFO] %s\n", msg)
+	return nil, nil
+}
+
+func logWarn(args ...interface{}) (interface{}, error) {
+	msg := formatLogArgs(args...)
+	fmt.Fprintf(os.Stderr, "[WARN] %s\n", msg)
+	return nil, nil
+}
+
+func logError(args ...interface{}) (interface{}, error) {
+	msg := formatLogArgs(args...)
+	fmt.Fprintf(os.Stderr, "[ERROR] %s\n", msg)
+	return nil, nil
+}
+
+func formatLogArgs(args ...interface{}) string {
+	if len(args) == 0 {
+		return ""
+	}
+	if len(args) == 1 {
+		return fmt.Sprintf("%v", args[0])
+	}
+	// First arg is format string, rest are values
+	format, ok := args[0].(string)
+	if !ok {
+		return fmt.Sprintf("%v", args[0])
+	}
+	// Check if it looks like a format string
+	if strings.Contains(format, "%") {
+		return fmt.Sprintf(format, args[1:]...)
+	}
+	// Otherwise join them
+	var parts []string
+	for _, arg := range args {
+		parts = append(parts, fmt.Sprintf("%v", arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+// Template Functions
+
+// templateRender performs simple {{placeholder}} interpolation from a data map.
+// Example: template_render("Hello {{name}}", {"name": "World"}) => "Hello World"
+func templateRender(args ...interface{}) (interface{}, error) {
+	template := stringArg(args, 0, "template")
+	data, ok := args[1].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("template_render: second argument must be a map")
+	}
+
+	result := template
+	// Replace {{key}} patterns with values from the map
+	re := regexp.MustCompile(`\{\{([^}]+)\}\}`)
+	result = re.ReplaceAllStringFunc(result, func(match string) string {
+		// Extract the key from {{key}}
+		key := match[2 : len(match)-2]
+		key = strings.TrimSpace(key)
+		if val, exists := data[key]; exists {
+			return fmt.Sprintf("%v", val)
+		}
+		// Leave placeholder as-is if key not found
+		return match
+	})
+
+	return result, nil
+}
+
+// Skill Validation Function
+
+// skillValidate parses and validates SKILL.md frontmatter.
+// Expected frontmatter format:
+// ---
+// name: skill-name
+// description: Skill description
+// ---
+func skillValidate(args ...interface{}) (interface{}, error) {
+	content := stringArg(args, 0, "content")
+
+	// Check for frontmatter delimiters
+	if !strings.Contains(content, "---") {
+		return map[string]interface{}{
+			"valid":   false,
+			"errors":  []string{"No frontmatter found (expected ---...---)"},
+			"parsed":  nil,
+		}, nil
+	}
+
+	lines := strings.Split(content, "\n")
+	if len(lines) < 3 || lines[0] != "---" {
+		return map[string]interface{}{
+			"valid":   false,
+			"errors":  []string{"Invalid frontmatter format (expected --- at start)"},
+			"parsed":  nil,
+		}, nil
+	}
+
+	// Find closing ---
+	endIdx := -1
+	for i := 2; i < len(lines); i++ {
+		if lines[i] == "---" {
+			endIdx = i
+			break
+		}
+	}
+
+	if endIdx == -1 {
+		return map[string]interface{}{
+			"valid":   false,
+			"errors":  []string{"Frontmatter not closed with ---"},
+			"parsed":  nil,
+		}, nil
+	}
+
+	// Parse frontmatter lines
+	frontmatter := make(map[string]string)
+	var errors []string
+	for i := 1; i < endIdx; i++ {
+		line := lines[i]
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(line, ":") {
+			errors = append(errors, fmt.Sprintf("Invalid frontmatter line %d: %s", i+1, line))
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		frontmatter[key] = val
+	}
+
+	// Check required fields
+	requiredFields := []string{"name", "description"}
+	for _, field := range requiredFields {
+		if _, exists := frontmatter[field]; !exists {
+			errors = append(errors, fmt.Sprintf("Missing required field: %s", field))
+		}
+	}
+
+	// Validate name format (lowercase, hyphens only)
+	if name, exists := frontmatter["name"]; exists {
+		if matched, _ := regexp.MatchString(`^[a-z0-9-]+$`, name); !matched {
+			errors = append(errors, fmt.Sprintf("Invalid name '%s': use lowercase letters, numbers, and hyphens only", name))
+		}
+	}
+
+	if len(errors) > 0 {
+		return map[string]interface{}{
+			"valid":   false,
+			"errors":  errors,
+			"parsed":  frontmatter,
+		}, nil
+	}
+
+	return map[string]interface{}{
+		"valid":   true,
+		"errors":  nil,
+		"parsed":  frontmatter,
+	}, nil
 }
 
 // JSON Functions
@@ -694,7 +1020,7 @@ func htmlEncode(args ...interface{}) (interface{}, error) {
 		case '&':
 			sb.WriteString("&amp;")
 		case '<':
-			sb.WriteString("&lt;")
+			sb.WriteString			("&lt;")
 		case '>':
 			sb.WriteString("&gt;")
 		case '"':
