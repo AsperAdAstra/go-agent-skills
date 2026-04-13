@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -184,7 +185,10 @@ func httpGet(args ...interface{}) (interface{}, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
 	return map[string]interface{}{"status": resp.StatusCode, "body": string(body), "headers": resp.Header}, nil
 }
 
@@ -194,30 +198,45 @@ func httpPost(args ...interface{}) (interface{}, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
 	return map[string]interface{}{"status": resp.StatusCode, "body": string(respBody)}, nil
 }
 
 func httpPut(args ...interface{}) (interface{}, error) {
-	req, _ := http.NewRequest("PUT", stringArg(args, 0, "url"), strings.NewReader(stringArg(args, 1, "body")))
+	req, err := http.NewRequest("PUT", stringArg(args, 0, "url"), strings.NewReader(stringArg(args, 1, "body")))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
 	return map[string]interface{}{"status": resp.StatusCode, "body": string(respBody)}, nil
 }
 
 func httpDelete(args ...interface{}) (interface{}, error) {
-	req, _ := http.NewRequest("DELETE", stringArg(args, 0, "url"), nil)
+	req, err := http.NewRequest("DELETE", stringArg(args, 0, "url"), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
 	return map[string]interface{}{"status": resp.StatusCode, "body": string(respBody)}, nil
 }
 
@@ -231,8 +250,29 @@ func httpHeaders(args ...interface{}) (interface{}, error) {
 }
 
 // File Functions
+
+// safePath validates that the given path doesn't escape the current working directory.
+// Blocks both relative ".." traversal and absolute paths.
+func safePath(path string) error {
+	// Clean the path
+	clean := filepath.Clean(path)
+	// Block relative path traversal
+	if strings.HasPrefix(clean, "..") {
+		return fmt.Errorf("path traversal attempt detected: %s", path)
+	}
+	// Block absolute paths to prevent reading /etc/passwd, /tmp, etc.
+	if filepath.IsAbs(clean) {
+		return fmt.Errorf("absolute paths not allowed: %s", path)
+	}
+	return nil
+}
+
 func fileRead(args ...interface{}) (interface{}, error) {
-	data, err := os.ReadFile(stringArg(args, 0, "path"))
+	path := stringArg(args, 0, "path")
+	if err := safePath(path); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -240,17 +280,29 @@ func fileRead(args ...interface{}) (interface{}, error) {
 }
 
 func fileWrite(args ...interface{}) (interface{}, error) {
-	err := os.WriteFile(stringArg(args, 0, "path"), []byte(stringArg(args, 1, "content")), 0644)
+	path := stringArg(args, 0, "path")
+	if err := safePath(path); err != nil {
+		return nil, err
+	}
+	err := os.WriteFile(path, []byte(stringArg(args, 1, "content")), 0600)
 	return err == nil, err
 }
 
 func fileExists(args ...interface{}) (interface{}, error) {
-	_, err := os.Stat(stringArg(args, 0, "path"))
+	path := stringArg(args, 0, "path")
+	if err := safePath(path); err != nil {
+		return false, err
+	}
+	_, err := os.Stat(path)
 	return err == nil, nil
 }
 
 func fileDelete(args ...interface{}) (interface{}, error) {
-	err := os.Remove(stringArg(args, 0, "path"))
+	path := stringArg(args, 0, "path")
+	if err := safePath(path); err != nil {
+		return nil, err
+	}
+	err := os.Remove(path)
 	return err == nil, err
 }
 
@@ -258,6 +310,9 @@ func fileList(args ...interface{}) (interface{}, error) {
 	dir := "."
 	if len(args) > 0 {
 		dir = args[0].(string)
+	}
+	if err := safePath(dir); err != nil {
+		return nil, err
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -276,10 +331,13 @@ func execCmd(args ...interface{}) (interface{}, error) {
 	var cmdArgs []string
 	if len(args) > 1 {
 		for i := 1; i < len(args); i++ {
-			cmdArgs = append(cmdArgs, args[i].(string))
+			cmdArgs = append(cmdArgs, stringArg(args, i, "arg"))
 		}
 	}
-	out, err := exec.Command(cmd, cmdArgs...).CombinedOutput()
+	// Use exec.CommandContext to allow cancellation and timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, cmd, cmdArgs...).CombinedOutput()
 	errStr := ""
 	if err != nil {
 		errStr = err.Error()
@@ -309,8 +367,12 @@ func jsonParse(args ...interface{}) (interface{}, error) {
 }
 
 func jsonStringify(args ...interface{}) (interface{}, error) {
-	data, err := json.Marshal(args[0])
-	return string(data), err
+	v := args[0]
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("json_stringify: %w", err)
+	}
+	return string(data), nil
 }
 
 func jsonToYaml(args ...interface{}) (interface{}, error) {
@@ -598,6 +660,9 @@ func randomInt(args ...interface{}) (interface{}, error) {
 	}
 	if len(args) >= 2 {
 		max = int(toFloat(args[1]))
+	}
+	if min >= max {
+		return nil, fmt.Errorf("random_int: min (%d) must be less than max (%d)", min, max)
 	}
 	rand.Seed(time.Now().UnixNano())
 	return rand.Intn(max-min) + min, nil

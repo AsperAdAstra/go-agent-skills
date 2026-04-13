@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 func main() {
@@ -122,19 +124,18 @@ func parseMetadata(content string) SkillMetadata {
 		parts := strings.SplitN(content, "---", 3)
 		if len(parts) >= 3 {
 			yamlContent := parts[1]
-			
-			// Simple YAML parsing
-			lines := strings.Split(yamlContent, "\n")
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "name:") {
-					metadata.Name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+
+			// Use proper YAML parser
+			var parsed map[string]interface{}
+			if err := yaml.Unmarshal([]byte(yamlContent), &parsed); err == nil {
+				if v, ok := parsed["name"].(string); ok {
+					metadata.Name = v
 				}
-				if strings.HasPrefix(line, "description:") {
-					metadata.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+				if v, ok := parsed["description"].(string); ok {
+					metadata.Description = v
 				}
-				if strings.HasPrefix(line, "homepage:") {
-					metadata.Homepage = strings.TrimSpace(strings.TrimPrefix(line, "homepage:"))
+				if v, ok := parsed["homepage"].(string); ok {
+					metadata.Homepage = v
 				}
 			}
 		}
