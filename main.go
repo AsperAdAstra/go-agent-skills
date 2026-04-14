@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/risor-io/risor"
-	"github.com/risor-io/risor/object"
+	"github.com/deepnoodle-ai/risor/v2"
+	"github.com/deepnoodle-ai/risor/v2/pkg/object"
 )
 
 // Global flag variables
@@ -178,36 +178,36 @@ func main() {
 		"random_choice": wrapFunc(randomChoice),
 	})
 
-	// Build the Risor options with all global functions
-	opts := []risor.Option{
+	// Build the Risor environment with all globals and modules
+	env := map[string]any{
 		// Utility globals (not namespaced)
-		risor.WithGlobal("exec_cmd", wrapFunc(execCmd)),
-		risor.WithGlobal("env_get", wrapFunc(envGet)),
-		risor.WithGlobal("env_set", wrapFunc(envSet)),
-		risor.WithGlobal("env_vars", wrapFunc(envVars)),
-		risor.WithGlobal("env_var", wrapFunc(envVar)),
-		risor.WithGlobal("log_debug", wrapFunc(logDebug)),
-		risor.WithGlobal("log_info", wrapFunc(logInfo)),
-		risor.WithGlobal("log_warn", wrapFunc(logWarn)),
-		risor.WithGlobal("log_error", wrapFunc(logError)),
-		risor.WithGlobal("template_render", wrapFunc(templateRender)),
-		risor.WithGlobal("args", toObject(argsMap)),
-		risor.WithGlobal("skill_validate", wrapFunc(skillValidate)),
+		"exec_cmd":         wrapFunc(execCmd),
+		"env_get":          wrapFunc(envGet),
+		"env_set":          wrapFunc(envSet),
+		"env_vars":         wrapFunc(envVars),
+		"env_var":          wrapFunc(envVar),
+		"log_debug":        wrapFunc(logDebug),
+		"log_info":         wrapFunc(logInfo),
+		"log_warn":         wrapFunc(logWarn),
+		"log_error":        wrapFunc(logError),
+		"template_render":  wrapFunc(templateRender),
+		"args":             toObject(argsMap),
+		"skill_validate":   wrapFunc(skillValidate),
 
-		// === Namespaced stdlib ===
-		risor.WithGlobalOverride("strings", stringsModule),
-		risor.WithGlobalOverride("json", jsonModule),
-		risor.WithGlobalOverride("file", fileModule),
-		risor.WithGlobalOverride("http", httpModule),
-		risor.WithGlobalOverride("math", mathModule),
-		risor.WithGlobalOverride("time", timeModule),
-		risor.WithGlobalOverride("crypto", cryptoModule),
-		risor.WithGlobalOverride("encoding", encodingModule),
-		risor.WithGlobalOverride("list", listModule),
-		risor.WithGlobalOverride("sys", sysModule),
+		// Namespaced stdlib
+		"strings":   stringsModule,
+		"json":      jsonModule,
+		"file":      fileModule,
+		"http":      httpModule,
+		"math":      mathModule,
+		"time":      timeModule,
+		"crypto":    cryptoModule,
+		"encoding":  encodingModule,
+		"list":      listModule,
+		"sys":       sysModule,
 	}
 
-	result, err := risor.Eval(ctx, string(scriptContent), opts...)
+	result, err := risor.Eval(ctx, string(scriptContent), risor.WithEnv(env), risor.WithRawResult())
 	if err != nil {
 		if cleanOutput {
 			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
@@ -218,7 +218,7 @@ func main() {
 	}
 
 	if result != nil {
-		resultVal := toGoValue(result)
+		resultVal := toGoValue(result.(object.Object))
 
 		if cleanOutput {
 			// Just print the raw result value
@@ -281,16 +281,16 @@ func parseScriptArgs(args []string) map[string]interface{} {
 type RisorFunc func(args ...interface{}) (interface{}, error)
 
 func wrapFunc(fn RisorFunc) object.Object {
-	return object.NewBuiltin(fmt.Sprintf("fn_%p", fn), func(ctx context.Context, args ...object.Object) object.Object {
+	return object.NewBuiltin(fmt.Sprintf("fn_%p", fn), func(ctx context.Context, args ...object.Object) (object.Object, error) {
 		goArgs := make([]interface{}, len(args))
 		for i, a := range args {
 			goArgs[i] = toGoValue(a)
 		}
 		result, err := fn(goArgs...)
 		if err != nil {
-			return object.NewError(fmt.Errorf("%v", err))
+			return nil, err
 		}
-		return toObject(result)
+		return toObject(result), nil
 	})
 }
 
