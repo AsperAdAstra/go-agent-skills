@@ -1,6 +1,6 @@
 # Risor Runner - Documentation
 
-Risor is an embedded scripting language for Go. This runner includes custom functions for HTTP, file I/O, and more.
+Risor is an embedded scripting language for Go. This runner includes a namespaced standard library for HTTP, file I/O, JSON, and more.
 
 ## Binary Location
 ```
@@ -10,26 +10,39 @@ Risor is an embedded scripting language for Go. This runner includes custom func
 ## Usage
 ```bash
 # Run a one-liner
-~/go/bin/risor-runner 'print(1 + 1)'
+./risor-runner 'strings.upper("hello")'
 
 # Run a script file
-~/go/bin/risor-runner -f script.risor
+./risor-runner -f script.risor
+
+# Run with script arguments (key=value pairs)
+./risor-runner -f script.risor name=World
 
 # Pretty print JSON output
-~/go/bin/risor-runner -pretty '...'
+./risor-runner -pretty 'math.abs(-5)'
+
+# Clean output (no JSON wrapper)
+./risor-runner --clean 'strings.upper("hello")'
 ```
+
+## Output Formats
+
+By default, output is wrapped: `{"result": value}`
+
+- `-pretty` — pretty-prints the JSON wrapper
+- `--clean` — outputs the raw value without wrapper (for piping)
 
 ## Important Constraints
 
 ### No Variable Assignment
-You cannot assign to variables. Use direct chaining instead:
+You cannot assign to variables. Use direct chaining:
 ```rison
 # ❌ Doesn't work
-r = http_get("https://example.com")
-print(r.body)
+result = http.get("https://example.com")
+print(result.body)
 
 # ✅ Works
-print(http_get("https://example.com").body)
+print(http.get("https://example.com").body)
 ```
 
 ### No Loops
@@ -37,186 +50,230 @@ For-loops and list comprehensions are not available. Work with collections direc
 
 ---
 
-## Available Functions
+## Standard Library
 
-### HTTP Functions
+All functions are organized into namespaces. Call them as `namespace.function(args)`.
 
-#### `http_get(url string) -> response`
-Make a GET request. Returns a response object with:
-- `.body` (string) - response body
-- `.headers` (map) - response headers
-- `.status` (int) - status code
+### strings
 
-```risor
-print(http_get("https://httpbin.org/get").body)
+String manipulation functions.
+
+```rison
+strings.upper("hello")              # "HELLO"
+strings.lower("HELLO")              # "hello"
+strings.trim("  hello  ")          # "hello" (trims spaces)
+strings.split("a,b,c", ",")         # ["a", "b", "c"]
+strings.join(["a", "b", "c"], "-") # "a-b-c"
+strings.replace("hello world", "world", "go")  # "hello go"
+strings.contains("hello", "ell")    # true
+strings.starts_with("hello", "hel") # true
+strings.ends_with("hello", "llo")   # true
+strings.regex_match("hello", "ello") # true
+strings.regex_replace("hello", "ello", "i")  # "hi"
+strings.html_encode("<div>&</div>") # "&lt;div&gt;&amp;&lt;/div&gt;"
 ```
 
-#### `http_post(url string, body string) -> response`
-Make a POST request with a body string.
+### json
 
-```risor
-print(http_post("https://httpbin.org/post", "{\"test\":1}").status)
+JSON parsing and serialization.
+
+```rison
+json.parse("{\"a\": 1}").a          # 1
+json.stringify({"b": 2})             # "{\"b\":2}"
+json.to_yaml({"x": 1})              # "x: 1"
 ```
 
-**Note:** URL must include `https://` prefix.
+### file
+
+File system operations. Paths are relative to working directory; absolute paths and `..` traversal are blocked.
+
+```rison
+file.exists("main.go")              # true
+file.read("main.go")                # file contents as string
+file.write("output.txt", "hello")   # true
+file.delete("output.txt")           # true
+file.list(".")                      # ["file1.go", "file2.go", ...]
+file.list_recursive(".")            # [{name, path, is_file, is_dir, size}, ...]
+```
+
+### http
+
+HTTP client functions. All return a response object with `.status`, `.body`, `.headers`.
+
+```rison
+http.get("https://httpbin.org/get").status        # 200
+http.post("https://httpbin.org/post", "data").body
+http.put("https://httpbin.org/put", "data").status
+http.delete("https://httpbin.org/delete").status
+http.headers("https://httpbin.org/get").headers
+```
+
+### math
+
+Mathematical functions.
+
+```rison
+math.abs(-5)        # 5
+math.floor(5.9)    # 5
+math.ceil(5.1)     # 6
+math.round(5.5)    # 6
+math.min(1, 5, 3)  # 1
+math.max(1, 5, 3)  # 5
+math.sum([1, 2, 3]) # 6
+math.avg([1, 2, 3]) # 2
+math.random_int(1, 100)  # random int between 1 and 100
+```
+
+### time
+
+Time functions.
+
+```rison
+time.now()                  # "2026-04-14T05:30:00Z" (RFC3339)
+time.timestamp()            # 1776144000 (Unix timestamp)
+time.format(time.now(), "2006-01-02")  # "2026-04-14"
+time.parse("2026-04-14", "2006-01-02").timestamp  # Unix timestamp
+```
+
+### crypto
+
+Hashing and encoding.
+
+```rison
+crypto.md5("hello")     # "5d41402abc4b2a76b9719d911017c592"
+crypto.sha256("hello")  # "2cf24dba5fb0..."
+crypto.base64_enc("hello")  # "aGVsbG8="
+crypto.base64_dec("aGVsbG8=")  # "hello"
+```
+
+### encoding
+
+URL encoding/decoding.
+
+```rison
+encoding.url_encode("hello world")   # "hello+world"
+encoding.url_decode("hello+world")   # "hello world"
+```
+
+### list
+
+List/collection operations.
+
+```rison
+list.first([1, 2, 3])       # 1
+list.last([1, 2, 3])        # 3
+list.reverse([1, 2, 3])     # [3, 2, 1]
+list.unique([1, 2, 2, 3])  # [1, 2, 3]
+list.flatten([[1, 2], [3]]) # [1, 2, 3]
+list.sort([3, 1, 2])       # [1, 2, 3]
+```
+
+### sys
+
+System utilities.
+
+```rison
+sys.os_name()      # "linux", "darwin", "windows"
+sys.hostname()     # "myserver"
+sys.uuid()         # "550e8400-e29b-..."
+sys.random_choice(["a", "b", "c"])  # random element
+```
 
 ---
 
-### File Functions
+## Utility Functions (Global)
 
-#### `file_exists(path string) -> bool`
-Check if a file exists.
+These are available directly without a namespace prefix.
 
-```risor
-print(file_exists("/tmp/test.txt"))
+### env
+
+```rison
+env_get("HOME")       # Get env var
+env_set("KEY", "val") # Set env var (for subprocesses)
+env_vars()            # All env vars as list
+env_var("HOME")        # {"value": "...", "exists": true}
 ```
 
-#### `file_read(path string) -> string`
-Read file contents.
+### log
 
-```risor
-print(file_read("/etc/hostname"))
+Structured logging (outputs to stderr with prefixes).
+
+```rison
+log_debug("debug message")
+log_info("info message")
+log_warn("warning message")
+log_error("error message")
 ```
 
-#### `file_write(path string, content string)`
-Write content to a file.
+### exec_cmd
 
-```risor
-file_write("/tmp/output.txt", "hello world")
-print(file_read("/tmp/output.txt"))
+Execute shell commands with 30s timeout.
+
+```rison
+exec_cmd("ls", "-la").output  # command output
+exec_cmd("ls", "-la").error   # error string (empty if success)
 ```
 
----
+### template_render
 
-### Environment Functions
+Simple `{{placeholder}}` interpolation.
 
-#### `env_get(key string) -> string`
-Get an environment variable.
-
-```risor
-print(env_get("HOME"))
+```rison
+template_render("Hello {{name}}", {"name": "World"})  # "Hello World"
 ```
 
----
+### args
 
-### JSON Functions
+Script arguments passed as `key=value` pairs.
 
-#### `json_parse(str string) -> object`
-Parse JSON string to Risor object.
-
-```risor
-print(json_parse("{\"a\":1}").a)  # 1
+```rison
+# ./risor-runner -f script.risor name=World city=London
+args.name    # "World"
+args.city    # "London"
+args.argv    # ["name=World", "city=London"]
 ```
 
-#### `json.marshal(obj) -> string`
-Marshal Risor object to JSON string.
+### skill_validate
 
-```risor
-print(json.marshal({"a": 1, "b": "hello"}))
-```
+Validate SKILL.md frontmatter format.
 
----
-
-### Time Functions
-
-#### `time.now() -> time`
-Get current time.
-
-```risor
-print(time.now())  # 2026-03-13T05:16:35Z
-```
-
-#### `time.now().format(layout string) -> string`
-Format time using Go layout (2006=year, 01=month, 02=day, 15=hour, 04=minute, 05=second).
-
-```risor
-print(time.now().format("2006-01-02"))        # 2026-03-13
-print(time.now().format("15:04:05"))           # 05:16:35
-print(time.now().format("Jan 2, 2006"))        # Mar 13, 2026
+```rison
+skill_validate(frontmatter_string)  # {"valid": true, "errors": null, "parsed": {...}}
 ```
 
 ---
 
-### String Functions (strings module)
+## Built-in Functions
 
-#### `strings.contains(s string, substr string) -> bool`
+These are always available in Risor:
 
-```risor
-print(strings.contains("hello world", "world"))  # true
-```
-
-#### `strings.split(s string, sep string) -> list`
-
-```risor
-print(strings.split("a,b,c", ","))  # ["a", "b", "c"]
-```
-
----
-
-### Math Functions (math module)
-
-```risor
-print(math.abs(-5))     # 5
-print(math.floor(5.9))  # 5
-print(math.ceil(5.1))   # 6
-print(math.round(5.5))  # 6
-```
-
----
-
-### Other Functions
-
-#### `print(...)`
-Print values to stdout.
-
-```risor
-print("hello")
-print(123)
-print([1, 2, 3])
-```
-
-#### `len(obj) -> int`
-Get length of string or list.
-
-```risor
-print(len("hello"))    # 5
-print(len([1, 2, 3]))  # 3
-```
-
-#### `type(obj) -> string`
-Get type of value.
-
-```risor
-print(type(1))         # int
-print(type("hello"))   # string
-print(type(true))      # bool
-print(type(http_get))  # builtin
-```
-
-#### `range(n int) -> int_iter`
-Create an integer iterator (for use with comprehensions if available).
-
-```risor
-print(range(5))  # int_iter(5)
+```rison
+print("hello")           # Print to stdout
+len([1, 2, 3])           # 3
+type(1)                  # "int"
+range(5)                 # int_iter
+true and false           # logical operators
+1 + 1                    # arithmetic
+"hello" + " " + "world"  # string concatenation
 ```
 
 ---
 
 ## Data Types
 
-- **int** - integers (1, 42, -10)
-- **float** - floating point (3.14)
-- **string** - strings ("hello", 'world')
-- **bool** - boolean (true, false)
-- **list** - arrays ([1, 2, 3])
-- **map** - objects ({"key": "value"})
-- **null** - nil value
+- **int** — integers (1, 42, -10)
+- **float** — floating point (3.14)
+- **string** — strings ("hello", 'world')
+- **bool** — boolean (true, false)
+- **list** — arrays ([1, 2, 3])
+- **map** — objects ({"key": "value"})
+- **null** — nil value
 
 ---
 
 ## Operators
 
-```risor
+```rison
 # Arithmetic
 1 + 1       # 2
 5 - 3       # 2
@@ -230,9 +287,9 @@ print(range(5))  # int_iter(5)
 5 < 3       # false
 
 # Logical
-true and false  # false
-true or false   # true
-not true        # false
+true and false   # false
+true or false    # true
+not true         # false
 
 # String
 "hello" + " " + "world"  # "hello world"
@@ -243,26 +300,31 @@ not true        # false
 ## Examples
 
 ### Weather API
-```risor
-print(json_parse(http_get("https://wttr.in/London?format=j1").body).current_condition[0].temp_C)
+```rison
+json.parse(http.get("https://wttr.in/London?format=j1").body).current_condition[0].temp_C
+```
+
+### File + JSON
+```rison
+file.write("/tmp/test.json", "{\"data\": 123}")
+json.parse(file.read("/tmp/test.json")).data
 ```
 
 ### GitHub API
-```risor
-print(http_get("https://api.github.com/repos/risor-io/risor").status)
+```rison
+http.get("https://api.github.com/repos/risor-io/risor").status
 ```
 
-### File Operations
-```risor
-file_write("/tmp/test.json", "{\"data\": 123}")
-print(json_parse(file_read("/tmp/test.json")).data)
+### Template Email
+```rison
+template_render("Hi {{name}}, your order #{{order}} is ready.", {"name": "Eli", "order": "12345"})
 ```
 
 ---
 
 ## Risor Generator
 
-There's also a code generator at `~/go/bin/risor-gen` that can generate Risor scripts from descriptions:
+A code generator at `~/go/bin/risor-gen` can generate Risor scripts from descriptions:
 
 ```bash
 ~/go/bin/risor-gen --desc "add two numbers"
@@ -273,6 +335,7 @@ There's also a code generator at `~/go/bin/risor-gen` that can generate Risor sc
 
 ## Notes
 
-- The runner outputs both the result and `{"result": null}` - this is normal
-- Use `-pretty` flag for pretty-printed JSON output
+- Output format: `{"result": value}` by default, `{"status": "error", "error": "..."}` on error
+- Use `--clean` flag for raw value output (useful for piping)
 - All URLs must include the protocol (https://)
+- File paths are relative to working directory; `..` and absolute paths are blocked
