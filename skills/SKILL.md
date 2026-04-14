@@ -1,6 +1,6 @@
 ---
 name: risor-scripting
-description: Use when writing or executing risor scripts for OpenClaw automation. Triggers on: "write a risor script", "run a risor script", "create a skill script", "automate with risor", or when asked to perform file operations, HTTP calls, JSON processing, or templating that would benefit from risor's scripting capabilities.
+description: 'Use when writing or executing risor scripts for OpenClaw automation. Triggers on: "write a risor script", "run a risor script", "create a skill script", "automate with risor", or when asked to perform file operations, HTTP calls, JSON processing, or templating that would benefit from risor''s scripting capabilities.'
 ---
 
 # Risor Scripting
