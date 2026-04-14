@@ -159,93 +159,42 @@ func main() {
 		"url_decode": wrapFunc(urlDecode),
 	})
 
+	// list namespace for list/collection operations
+	listModule := object.NewBuiltinsModule("list", map[string]object.Object{
+		"first":   wrapFunc(first),
+		"last":    wrapFunc(last),
+		"reverse": wrapFunc(reverseList),
+		"unique":  wrapFunc(unique),
+		"flatten": wrapFunc(flatten),
+		"sort":    wrapFunc(sortList),
+	})
+
+	// sys namespace for system utilities
+	sysModule := object.NewBuiltinsModule("sys", map[string]object.Object{
+		"os_name":   wrapFunc(osName),
+		"hostname":  wrapFunc(hostname),
+		"uuid":      wrapFunc(uuidGen),
+		"random_int": wrapFunc(randomInt),
+		"random_choice": wrapFunc(randomChoice),
+	})
+
 	// Build the Risor options with all global functions
 	opts := []risor.Option{
-		// HTTP
-		risor.WithGlobal("http_get", wrapFunc(httpGet)),
-		risor.WithGlobal("http_post", wrapFunc(httpPost)),
-		risor.WithGlobal("http_put", wrapFunc(httpPut)),
-		risor.WithGlobal("http_delete", wrapFunc(httpDelete)),
-		risor.WithGlobal("http_headers", wrapFunc(httpHeaders)),
-		// File
-		risor.WithGlobal("file_read", wrapFunc(fileRead)),
-		risor.WithGlobal("file_write", wrapFunc(fileWrite)),
-		risor.WithGlobal("file_exists", wrapFunc(fileExists)),
-		risor.WithGlobal("file_delete", wrapFunc(fileDelete)),
-		risor.WithGlobal("file_list", wrapFunc(fileList)),
-		risor.WithGlobal("file_list_recursive", wrapFunc(fileListRecursive)),
-		// Exec & Env
+		// Utility globals (not namespaced)
 		risor.WithGlobal("exec_cmd", wrapFunc(execCmd)),
 		risor.WithGlobal("env_get", wrapFunc(envGet)),
 		risor.WithGlobal("env_set", wrapFunc(envSet)),
 		risor.WithGlobal("env_vars", wrapFunc(envVars)),
 		risor.WithGlobal("env_var", wrapFunc(envVar)),
-		// JSON
-		risor.WithGlobal("json_parse", wrapFunc(jsonParse)),
-		risor.WithGlobal("json_stringify", wrapFunc(jsonStringify)),
-		risor.WithGlobal("json_to_yaml", wrapFunc(jsonToYaml)),
-		// String
-		risor.WithGlobal("split", wrapFunc(split)),
-		risor.WithGlobal("join", wrapFunc(join)),
-		risor.WithGlobal("trim", wrapFunc(trim)),
-		risor.WithGlobal("upper", wrapFunc(upper)),
-		risor.WithGlobal("lower", wrapFunc(lower)),
-		risor.WithGlobal("replace", wrapFunc(replace)),
-		risor.WithGlobal("regex_match", wrapFunc(regexMatch)),
-		risor.WithGlobal("regex_replace", wrapFunc(regexReplace)),
-		risor.WithGlobal("contains", wrapFunc(contains)),
-		risor.WithGlobal("starts_with", wrapFunc(startsWith)),
-		risor.WithGlobal("ends_with", wrapFunc(endsWith)),
-		// List
-		risor.WithGlobal("first", wrapFunc(first)),
-		risor.WithGlobal("last", wrapFunc(last)),
-		risor.WithGlobal("reverse", wrapFunc(reverseList)),
-		risor.WithGlobal("unique", wrapFunc(unique)),
-		risor.WithGlobal("flatten", wrapFunc(flatten)),
-		risor.WithGlobal("sort", wrapFunc(sortList)),
-		// Math
-		risor.WithGlobal("min", wrapFunc(minVal)),
-		risor.WithGlobal("max", wrapFunc(maxVal)),
-		risor.WithGlobal("sum", wrapFunc(sumVals)),
-		risor.WithGlobal("avg", wrapFunc(avgVals)),
-		risor.WithGlobal("round_val", wrapFunc(roundVal)),
-		risor.WithGlobal("floor_val", wrapFunc(floorVal)),
-		risor.WithGlobal("ceil_val", wrapFunc(ceilVal)),
-		risor.WithGlobal("abs_val", wrapFunc(absVal)),
-		// Time
-		risor.WithGlobal("now", wrapFunc(now)),
-		risor.WithGlobal("timestamp", wrapFunc(timestamp)),
-		risor.WithGlobal("format_time", wrapFunc(formatTime)),
-		risor.WithGlobal("parse_time", wrapFunc(parseTime)),
-		// Crypto
-		risor.WithGlobal("md5_hash", wrapFunc(md5Hash)),
-		risor.WithGlobal("sha256_hash", wrapFunc(sha256Hash)),
-		risor.WithGlobal("base64_encode", wrapFunc(base64Encode)),
-		risor.WithGlobal("base64_decode", wrapFunc(base64Decode)),
-		// System
-		risor.WithGlobal("os_name", wrapFunc(osName)),
-		risor.WithGlobal("hostname", wrapFunc(hostname)),
-		// Random & ID
-		risor.WithGlobal("uuid", wrapFunc(uuidGen)),
-		risor.WithGlobal("random_int", wrapFunc(randomInt)),
-		risor.WithGlobal("random_choice", wrapFunc(randomChoice)),
-		// Encoding
-		risor.WithGlobal("url_encode", wrapFunc(urlEncode)),
-		risor.WithGlobal("url_decode", wrapFunc(urlDecode)),
-		risor.WithGlobal("html_encode", wrapFunc(htmlEncode)),
-		// Logging (structured, outputs to stderr)
 		risor.WithGlobal("log_debug", wrapFunc(logDebug)),
 		risor.WithGlobal("log_info", wrapFunc(logInfo)),
 		risor.WithGlobal("log_warn", wrapFunc(logWarn)),
 		risor.WithGlobal("log_error", wrapFunc(logError)),
-		// Template
 		risor.WithGlobal("template_render", wrapFunc(templateRender)),
-		// Script arguments (key=value pairs)
 		risor.WithGlobal("args", toObject(argsMap)),
-		// Skill validation
 		risor.WithGlobal("skill_validate", wrapFunc(skillValidate)),
 
-		// === Namespaced stdlib (uses override to replace built-in modules) ===
+		// === Namespaced stdlib ===
 		risor.WithGlobalOverride("strings", stringsModule),
 		risor.WithGlobalOverride("json", jsonModule),
 		risor.WithGlobalOverride("file", fileModule),
@@ -254,6 +203,8 @@ func main() {
 		risor.WithGlobalOverride("time", timeModule),
 		risor.WithGlobalOverride("crypto", cryptoModule),
 		risor.WithGlobalOverride("encoding", encodingModule),
+		risor.WithGlobalOverride("list", listModule),
+		risor.WithGlobalOverride("sys", sysModule),
 	}
 
 	result, err := risor.Eval(ctx, string(scriptContent), opts...)
